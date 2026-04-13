@@ -24,18 +24,26 @@ Additional findings from Srikrishna Sekhar (NRAO, co-author of the IDIA frocc pi
 
 ## Pipeline Overview
 
-The pipeline has 5 phases. Each phase must be validated on a small test before scaling up.
+The pipeline has 7 phases. Phases 0-1 and 3a are complete. Phase 2 (continuum subtraction) has been **dropped** -- the sideband analysis approach makes it unnecessary.
 
 ```
-Phase 0: Reconnaissance & Setup
+Phase 0: Reconnaissance & Setup                              [COMPLETE]
     |
-Phase 1: TOPO -> LSRK Conversion + Subband Splitting (SERIAL)
+Phase 1: Subband Splitting (SERIAL)                          [COMPLETE]
     |
-Phase 2: Continuum Subtraction (PARALLEL across subbands)
+Phase 2: Continuum Subtraction                               [DROPPED - not needed]
     |
-Phase 3: Channel Imaging with WSClean (PARALLEL across subbands)
+Phase 3a: Dirty Imaging (PARALLEL across subbands)           [COMPLETE]
     |
-Phase 4: FITS Export & Assembly
+Phase 3b: Cleaned Imaging (PARALLEL across subbands)         [NEEDS REDO - auto-multithresh failed]
+    |
+Phase 4: FITS Export & Assembly                              [COMPLETE for dirty; redo after 3b]
+    |
+Phase 5: RFI Flagging / Channel Quality Map                  [NEW - mark bad channels]
+    |
+Phase 6: Sanity Checks & Signal Injection Tests              [NEW]
+    |
+Phase 7: Axion Search via Sideband Analysis                  [NEW]
 ```
 
 ---
@@ -146,110 +154,40 @@ WSClean may be able to handle TOPO data directly for narrow subbands where the T
 
 ---
 
-## Phase 2: Continuum Subtraction
+## Phase 2: Continuum Subtraction -- DROPPED
 
-**Goal**: Remove the bright continuum emission (especially from the Galactic Center) from the visibilities. This is critical because:
-1. The GC has extremely high sky temperature at L-band
-2. Continuum subtraction reduces spectral noise
-3. It prevents continuum sidelobes from contaminating channel maps
-
-### Approach
-
-For each subband:
-
-1. **Make a continuum image** of the subband (averaging all channels):
-   ```bash
-   wsclean -name subband_XX_cont \
-       -size 4096 4096 \
-       -scale 2asec \
-       -niter 50000 \
-       -auto-threshold 3 \
-       -auto-mask 5 \
-       -channels-out 1 \
-       -j 8 \
-       -mem 80 \
-       subband_XX.ms
-   ```
-
-2. **Predict the continuum model back into the MS** and subtract:
-   ```bash
-   wsclean -name subband_XX_cont \
-       -size 4096 4096 \
-       -scale 2asec \
-       -predict \
-       subband_XX.ms
-   ```
-   Then use CASA or taql to subtract:
-   ```python
-   # In CASA
-   uvsub(vis='subband_XX.ms')
-   ```
-
-3. **Optional: Self-calibration** on the continuum to improve dynamic range before subtraction. This is important for the GC field which has very bright sources.
-
-### Parallelization
-- Each subband is an independent MS file, so all subbands can be processed in parallel via SLURM array jobs.
-- Allocate one compute node per subband.
-
-### Validation
-- Image a few channels before and after continuum subtraction
-- Verify that bright point sources are removed
-- Check that noise levels are reduced as expected
+**Status**: Not needed. The sideband analysis approach (Phase 7) removes the need for visibility-domain continuum subtraction. For each axion frequency, the background model is derived from nearby frequency channels (the "sideband"), which naturally captures and removes the continuum spatial morphology. This is more robust than uvsub for our science case.
 
 ---
 
-## Phase 3: Channel Imaging with WSClean
+## Phase 3: Channel Imaging
 
-**Goal**: Produce individual channel images for every spectral channel in every subband.
+### Phase 3a: Dirty Imaging -- COMPLETE
 
-### Why WSClean over tclean
-- WSClean does NOT place file locks on the MS (confirmed by Aritra)
-- WSClean is significantly faster than tclean for this type of work
-- WSClean can produce image cubes or individual channel maps natively
+**Status**: All 86 subbands imaged with niter=0. 32,768 channel FITS files produced.
+- Located in `images/subband_XXX/chan_NNNN_FREQ.fits`
+- 512x512 pixels, 2 arcsec/pixel, Briggs robust=0.5
+- Used CASA tclean (not WSClean) with cube mode, then imsubimage+exportfits per channel
+- Timing: ~50 min per subband cube on lr7 (56 cores, 240 GB)
 
-### Approach
+### Phase 3b: Cleaned Imaging -- NEEDS REDO
 
-For each subband (parallelized across subbands via SLURM):
+**Status**: First attempt with auto-multithresh FAILED. The noisethreshold=5.0 was too high for per-channel SNR (~2.7), so tclean produced zero clean components. Cleaned images are identical to dirty.
+
+**Next approach**: Need a cleaning strategy that works at low per-channel SNR. Options:
+1. **Continuum-derived clean mask**: Make a wideband continuum image (high SNR), create a mask from it, apply to per-channel tclean
+2. **WSClean with auto-mask at lower threshold**: WSClean may handle this better than CASA's auto-multithresh
+3. **Interactive mask from dirty continuum**: Use the existing dirty images averaged in frequency to define a mask
+
+**The axion search requires CLEANED images** (per collaborator meeting 2026-04-13). The cleaning step must be validated via signal injection tests (Phase 6) before production.
+
+### Original WSClean approach (for reference)
+
+WSClean does NOT place file locks on the MS, is faster than tclean, and outputs FITS natively. It remains a viable alternative if CASA tclean cleaning continues to be problematic.
 
 ```bash
 wsclean -name subband_XX_channels \
-    -size 4096 4096 \
-    -scale 2asec \
-    -channels-out 383 \          # one output per channel
-    -niter 10000 \
-    -auto-threshold 3 \
-    -auto-mask 5 \
-    -j 8 \
-    -mem 80 \
-    -no-mf-weighting \
-    subband_XX.ms
-```
-
-### Important considerations
-
-- **Image size**: Aritra suggests starting with smaller images (512x512 or even 128x128) for testing, then scaling to the full FOV. The full MeerKAT L-band primary beam is large (~1 degree at 1.4 GHz), requiring ~4096x4096 at 2" pixels.
-- **Memory**: WSClean with large cubes can require 1 TB+ RAM (per Aritra). For 4096x4096 images with ~500 channels per subband, memory may be the limiting factor.
-  - Mitigation: Process in smaller frequency chunks within each subband, or use smaller image sizes and mosaic.
-- **Single-node constraint**: WSClean is not optimized for multi-node parallelism. Each SLURM job should request a single node with many cores and large RAM.
-- **Phase-center shifting**: If the full FOV is too large for memory, image smaller patches (e.g., 1024x1024) at different phase centers and stitch. For the axion search, it may be sufficient to image only the central region around Sgr A* and known magnetars.
-
-### SLURM job template
-```bash
-#!/bin/bash
-#SBATCH --job-name=wsclean_subband
-#SBATCH --array=0-59
-#SBATCH --nodes=1
-#SBATCH --ntasks=1
-#SBATCH --cpus-per-task=16
-#SBATCH --mem=256G          # adjust based on testing
-#SBATCH --time=24:00:00
-
-SUBBAND_IDX=$SLURM_ARRAY_TASK_ID
-INPUT_MS="subbands/subband_${SUBBAND_IDX}.ms"
-OUTPUT_PREFIX="images/subband_${SUBBAND_IDX}"
-
-wsclean -name ${OUTPUT_PREFIX} \
-    -size 4096 4096 \
+    -size 512 512 \
     -scale 2asec \
     -channels-out 383 \
     -niter 10000 \
@@ -257,8 +195,15 @@ wsclean -name ${OUTPUT_PREFIX} \
     -auto-mask 5 \
     -j 16 \
     -mem 80 \
-    ${INPUT_MS}
+    -no-mf-weighting \
+    subband_XX.ms
 ```
+
+### Important considerations
+
+- **Image size**: Currently using 512x512. Full MeerKAT FOV at 2" would be ~4096x4096 but not needed for axion search if targets are near field center.
+- **Memory**: WSClean with large cubes can require 1 TB+ RAM. 512x512 is manageable.
+- **Single-node constraint**: WSClean is not optimized for multi-node MPI. Each SLURM job should request a single node.
 
 ---
 
@@ -310,6 +255,87 @@ subband_XX-0001-image.fits
 4. **Calibration issues**: If the archival data is not well-calibrated, this will show up as imaging artifacts. Self-calibration in Phase 2 can help, but severe issues may require a full re-calibration.
 
 5. **RFI**: MeerKAT L-band has known RFI bands. Channels heavily affected by RFI should be flagged before imaging. Tricolour can help with this.
+
+---
+
+## Phase 5: RFI Flagging / Channel Quality Map
+
+**Goal**: Identify and mark channels affected by RFI. **Do NOT modify the existing dirty or cleaned FITS files.** Instead, produce a boolean channel quality map that downstream analysis can use to exclude bad channels.
+
+### Approach
+
+1. **Known MeerKAT L-band RFI**: GSM-900 (~925-960 MHz, subbands ~7-10), GPS L1 (1575.42 MHz, subband ~72), and others documented in MeerKAT RFI environment reports.
+2. **Statistical detection**: For each channel FITS, compute image statistics (RMS, peak, kurtosis). Channels with anomalous statistics (e.g., RMS >> median RMS of neighboring channels) are flagged.
+3. **Output**: A CSV or FITS table mapping `(subband, channel, frequency_MHz) -> rfi_flag (bool)` plus summary statistics.
+4. **Preserve data**: The dirty images in `images/subband_XXX/` must remain untouched. The RFI map is metadata only.
+
+### Known problematic subbands
+- Subband 0 (856 MHz): band edge, channel 0 artifact
+- Subbands ~7-10 (~920-960 MHz): GSM-900 mobile RFI
+- Subband ~72 (~1575 MHz): GPS L1
+
+---
+
+## Phase 6: Sanity Checks & Signal Injection Tests
+
+**Goal**: Validate the imaging and cleaning pipeline before trusting it for the axion search. This phase is done in Jupyter notebooks for interactive exploration.
+
+### 6a: Point Source Injection Baseline
+
+1. Take a dirty image (any clean channel with no RFI)
+2. Add a synthetic point source (known flux, known position) to the dirty image
+3. Clean the modified dirty image
+4. Verify the cleaned version recovers the injected source with correct flux and position
+5. **Note**: Axion signal point sources will be **resolved by multiple pixels** (not unresolved), so also test with extended Gaussian sources matching expected axion signal morphology
+
+### 6b: Cleaning Fidelity Test (5-sigma threshold)
+
+1. In cleaned images, measure the noise (RMS) and establish the 5-sigma detection threshold
+2. Inject a signal at ~5-sigma into the **dirty** data (visibilities or image-plane)
+3. Re-clean the data containing the injected signal
+4. Verify that the cleaning process does **not** absorb, suppress, or distort the injected signal
+5. This confirms that the cleaning step is safe for the axion search -- i.e., a real signal above threshold would survive cleaning
+
+### Implementation
+- Jupyter notebook(s) in the project root
+- Use a few representative subbands (low-RFI, mid-band channels)
+- Document results with plots showing before/after injection and cleaning
+
+---
+
+## Phase 7: Axion Search via Sideband Analysis
+
+**Goal**: Search for axion-photon conversion signals from neutron star magnetospheres using cleaned channel images.
+
+### Source Catalog
+- **Sam Witte has a template bank of converting neutron stars** -- these are the target positions and expected signal properties
+- Each target NS has a predicted axion signal frequency (or frequency range) and spatial extent
+- Axion signals are **resolved by multiple pixels** in MeerKAT images
+
+### Sideband Background Model
+
+For each candidate axion frequency channel:
+
+1. Define a **sideband** -- a set of nearby frequency channels (excluding the signal channel and a small guard band)
+2. Use the spatial morphology of the sideband channels as the **background model**
+   - The sideband naturally captures continuum emission, diffuse structure, and any frequency-smooth backgrounds
+   - This is why continuum subtraction (Phase 2) is unnecessary
+3. Subtract (or divide) the background model from the signal channel
+4. Search the residual for excess emission at the expected NS position and morphology
+
+### Detection Pipeline
+
+1. For each NS in Sam's template bank:
+   - Identify the predicted axion frequency → map to the corresponding channel FITS
+   - Construct sideband from neighboring channels
+   - Build background model from sideband spatial morphology
+   - Compute residual at the NS position
+   - Assess significance against the local noise
+2. Catalog all candidates above threshold
+3. Cross-check with RFI flag map (Phase 5) to reject false positives from RFI channels
+
+### Validation (ties back to Phase 6)
+- The signal injection test (Phase 6b) must confirm that the cleaning + sideband subtraction pipeline preserves injected signals above the 5-sigma threshold
 
 ---
 

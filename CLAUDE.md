@@ -139,3 +139,14 @@ These scripts document what was tried. They can be adapted for the new pipeline 
 - Units are Jy/beam.
 - There are known RFI bands in MeerKAT L-band; channels around 1.3 GHz are relatively RFI-quiet.
 - The 81 previously processed channels start at 1.3 GHz.
+
+## Session Handoff
+
+**At the end of every session**, create or update `handoff.md` in the project root with a summary of what happened during the session. This file serves as context for the next session so continuity is not lost. Include:
+
+1. **What was done** — key actions, commands run, files created/modified
+2. **Current state** — what's working, what's broken, where things stand
+3. **Next steps** — what should be done next, any blockers or open questions
+4. **Gotchas / lessons learned** — anything surprising that came up
+
+At the **start of every session**, read `handoff.md` before doing anything else to pick up where the last session left off.
