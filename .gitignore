@@ -3,6 +3,9 @@ subbands/
 images/
 test_phase0/
 
+# Private reference materials (emails, Slack logs)
+reference/
+
 # CASA temp files
 *.log
 TempLattice*
