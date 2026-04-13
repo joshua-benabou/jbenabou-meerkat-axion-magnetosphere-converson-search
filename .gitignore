@@ -1,0 +1,25 @@
+# Data directories (TB-scale, never commit)
+subbands/
+images/
+test_phase0/
+
+# CASA temp files
+*.log
+TempLattice*
+IMAGING_WEIGHT_*
+
+# SLURM logs (keep in scripts/logs/ but don't track)
+scripts/logs/
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+
+# Claude scheduled tasks
+.claude/
+
+# Python
+__pycache__/
+*.pyc
+
+# OS
+.DS_Store
