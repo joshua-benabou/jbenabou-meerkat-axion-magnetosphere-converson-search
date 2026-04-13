@@ -2,6 +2,11 @@
 subbands/
 images/
 test_phase0/
+test_cleaning/
+results/
+
+# Data products
+rfi_channel_flags.csv
 
 # Private reference materials (emails, Slack logs)
 reference/

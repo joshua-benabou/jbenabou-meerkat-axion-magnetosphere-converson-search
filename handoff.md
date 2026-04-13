@@ -1,6 +1,6 @@
 # Session Handoff
 
-**Last updated**: 2026-04-13 (mid-session update)
+**Last updated**: 2026-04-13 (end-of-session update)
 
 ## Current Pipeline State
 
@@ -90,12 +90,41 @@ All in `scripts/`:
 - `test_cleaning_strategy.py` / `test_cleaning_submit.sh` -- cleaning test (3 strategies)
 - `validate_fits.py` -- FITS validation
 
+## Session 2026-04-13: What Was Done
+
+1. Created `handoff.md` and added Session Handoff section to CLAUDE.md
+2. Updated `master_plan.md` with meeting decisions (dropped Phase 2, added Phases 5-7)
+3. Pushed to GitHub: https://github.com/joshua-benabou/jbenabou-meerkat-axion-magnetosphere-converson-search.git
+4. Scrubbed `reference/` from git history (private emails/Slack)
+5. **Phase 5 RFI flagging**: Complete. 1,656/32,768 channels flagged (5.1%). Output: `rfi_channel_flags.csv`, `plots/rfi_overview.png`
+6. **Phase 6 sanity checks notebook**: Created `phase6_sanity_checks.ipynb` (not yet run)
+7. **Phase 7 axion search skeleton**: Created `scripts/phase7_axion_search.py` with real sideband subtraction code
+8. **Cleaning test** (job 21925201): Tested 3 strategies on subband_030 -- ALL produced zero clean components
+9. Cloned AxionLinePop to `reference/AxionLinePop/` and analyzed the SBI/CASCAL pipeline
+10. Analyzed Josh Foster's public RadioAxionSearch repo
+
+## Critical Finding: Cleaning Doesn't Work
+
+**The GC field cannot be deconvolved at native 26 kHz resolution without self-calibration.**
+
+Test results from subband_030 (1156-1166 MHz):
+- MFS continuum: peak=138 mJy, RMS=52.9 mJy (sidelobe-dominated), SNR=2.6
+- Per-channel: peaks=268-276 mJy, RMS=94.8 mJy, 3σ threshold=284 mJy
+- All masks (5σ, 3σ, absolute) are empty -- sidelobes dominate everywhere
+- All 3 cleaning strategies (mask+threshold, mask+threshold, no-mask+threshold) → modelFlux=0
+
+**Decision needed**: Proceed with dirty images for sideband analysis (sidelobes are frequency-smooth, will subtract), or invest in self-calibration first.
+
 ## Gotchas / Lessons Learned
 
 1. **Never run parallel jobs reading the monolithic MS** -- 2-year blocker
 2. **exportfits channel keyword doesn't exist** -- use imsubimage+exportfits
 3. **CRVAL3 in FITS headers** is cube reference freq, not per-channel; read from filenames
 4. **Band-edge subbands** (0, 85) and **RFI subbands** (~8) take 2-4x longer
-5. **auto-multithresh doesn't work** for per-channel SNR ~2.7
-6. **Josh Foster's AxionLinePop repo** appears private; RadioAxionSearch is public
-7. **Sam's data** only exists as Slack uploads (may have expired WeTransfer links)
+5. **auto-multithresh doesn't work** for per-channel imaging -- SNR too low AND sidelobes dominate
+6. **Cleaning fundamentally limited** by dynamic range of the GC field without self-cal
+7. **Per-channel tclean is slow** (~7 min/call) because it scans the full 383-channel MS for each channel; cube mode is much faster
+8. **imstat RMS** over the full image is dominated by sidelobes, not thermal noise
+9. **AxionLinePop** cloned to `reference/AxionLinePop/` -- private repo, CARL/CASCAL SBI with TensorFlow
+10. **pandas not available** in casa_cookbook conda env -- scripts use csv/numpy instead
+11. **Sam's data** only exists as Slack uploads (may have expired WeTransfer links)
