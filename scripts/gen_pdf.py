@@ -1,231 +1,285 @@
 #!/usr/bin/env python3
-"""Generate a PDF with paper-ready data processing description."""
+"""Generate a PDF with paper-ready data processing description and embedded plots."""
 
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
-from matplotlib.backends.backend_pdf import PdfPages
-import textwrap
+import os
+from fpdf import FPDF
 
-pdf_path = (
+PROJECT_DIR = (
     '/global/scratch/projects/pc_heptheory/jbenabou/NS_megaproject/MeerKAT_data/'
-    'meerkat_reduction_project/processing_summary.pdf'
+    'meerkat_reduction_project'
+)
+PLOTS_DIR = os.path.join(PROJECT_DIR, 'plots')
+PDF_PATH = os.path.join(PROJECT_DIR, 'processing_summary.pdf')
+
+
+class Report(FPDF):
+    def header(self):
+        if self.page_no() > 1:
+            self.set_font('Helvetica', 'I', 8)
+            self.cell(0, 5, 'MeerKAT GC Data Reduction - Benabou et al.', align='L')
+            self.cell(0, 5, f'Page {self.page_no()}', align='R', new_x='LMARGIN', new_y='NEXT')
+            self.ln(2)
+
+    def section(self, title):
+        self.set_font('Helvetica', 'B', 12)
+        self.cell(0, 8, title, new_x='LMARGIN', new_y='NEXT')
+        self.ln(1)
+
+    def body_text(self, text):
+        self.set_font('Times', '', 10)
+        self.multi_cell(0, 5, text)
+        self.ln(2)
+
+    def figure(self, img_path, caption, width=180):
+        if os.path.exists(img_path):
+            # Center the image
+            x = (self.w - width) / 2
+            # Check if we need a new page (image + caption ~ 100mm)
+            if self.get_y() + 110 > self.h - 20:
+                self.add_page()
+            self.image(img_path, x=x, w=width)
+            self.ln(2)
+            self.set_font('Helvetica', 'I', 9)
+            self.multi_cell(0, 4, caption)
+            self.ln(4)
+        else:
+            self.set_font('Helvetica', 'I', 9)
+            self.cell(0, 5, f'[Plot not found: {os.path.basename(img_path)}]',
+                      new_x='LMARGIN', new_y='NEXT')
+            self.ln(2)
+
+    def table_row(self, label, value):
+        self.set_font('Helvetica', 'B', 9)
+        self.cell(55, 5, label)
+        self.set_font('Times', '', 9)
+        self.cell(0, 5, value, new_x='LMARGIN', new_y='NEXT')
+
+
+pdf = Report()
+pdf.set_auto_page_break(auto=True, margin=20)
+pdf.add_page()
+
+# === Title ===
+pdf.set_font('Helvetica', 'B', 18)
+pdf.cell(0, 12, 'MeerKAT Galactic Center', align='C', new_x='LMARGIN', new_y='NEXT')
+pdf.cell(0, 12, 'Data Reduction Summary', align='C', new_x='LMARGIN', new_y='NEXT')
+pdf.ln(3)
+pdf.set_font('Helvetica', '', 11)
+pdf.cell(0, 7, 'J. Benabou, UC Berkeley / Safdi Group', align='C', new_x='LMARGIN', new_y='NEXT')
+pdf.cell(0, 7, 'April 2026', align='C', new_x='LMARGIN', new_y='NEXT')
+pdf.ln(8)
+
+# === 1. Observation ===
+pdf.section('1. Observation')
+pdf.body_text(
+    'We use data from the MeerKAT Galactic Centre Legacy Survey '
+    '(proposal SCI-20210212-SS-01). The observation targets Sgr A* in '
+    'L-band (856-1712 MHz) with 32,768 spectral channels at a native '
+    'channel width of 26.123 kHz. The total measurement set (MS) is '
+    '~17 TB. The data were pre-calibrated by the MeerKAT Science Data '
+    'Processor (SDP) pipeline prior to archive delivery.'
 )
 
+# === 2. Subband Splitting ===
+pdf.section('2. Subband Splitting')
+pdf.body_text(
+    'The monolithic MS was split into 86 independent subbands of 383 '
+    'channels each (~10 MHz per subband) using the CASA split task '
+    '(casatasks.split, CASA 6.x). Splitting was performed serially to '
+    'avoid file-locking contention on the Lustre parallel filesystem. '
+    'Each split operation selected a contiguous range of channels via '
+    'the spw parameter (spw="0:start~end") and wrote the DATA column '
+    'to a new MS. The typical split time was ~90 minutes per subband. '
+    'No frequency regridding was applied; the TOPO-to-LSRK Doppler '
+    'correction is <0.1 channel widths for a single observation and is '
+    'applied as a metadata correction in post-processing.'
+)
 
-class PageWriter:
-    def __init__(self, ax):
-        self.ax = ax
-        self.y = 0.95
+# === 3. Imaging ===
+pdf.section('3. Imaging')
+pdf.body_text(
+    'Channel images were produced using the CASA tclean task in cube '
+    'mode (specmode="cube"), generating a 383-channel image cube per '
+    'subband in a single tclean call. Each cube was then decomposed '
+    'into individual single-channel FITS files using imsubimage and '
+    'exportfits, yielding one 512x512 pixel image per spectral channel '
+    'at 2 arcsec pixel scale (between 1/3 and 1/5 of the synthesized '
+    'beam across the band). Briggs weighting with robust=0.5 was used. '
+    'The full dataset produces 32,768 channel images spanning '
+    '856-1712 MHz at the native 26.123 kHz resolution.'
+)
+pdf.body_text(
+    'Dirty images (niter=0) are the direct Fourier inversion '
+    'of the calibrated visibilities with no deconvolution, providing an '
+    'unbiased representation of the sky convolved with the synthesized '
+    'beam (PSF). The dirty image noise is ~0.09 Jy/beam per 26 kHz '
+    'channel in the mid-band (~1.1 GHz).'
+)
 
-    def title(self, s, size=14, dy=0.045):
-        self.ax.text(0.0, self.y, s, fontsize=size, fontweight='bold',
-                     transform=self.ax.transAxes, verticalalignment='top',
-                     fontfamily='serif')
-        self.y -= dy
+# Figure: example dirty image
+pdf.figure(
+    os.path.join(PLOTS_DIR, 'dirty_image_example.png'),
+    'Figure 1: Representative dirty channel image at ~1.1 GHz. '
+    'Left: linear scale showing the thermal noise and source structure. '
+    'Right: log scale revealing faint emission and PSF sidelobes across the field.'
+)
 
-    def heading(self, s, size=11, dy=0.035):
-        self.ax.text(0.0, self.y, s, fontsize=size, fontweight='bold',
-                     transform=self.ax.transAxes, verticalalignment='top',
-                     fontfamily='serif')
-        self.y -= dy
+# Figure: zoomed Sgr A*
+pdf.figure(
+    os.path.join(PLOTS_DIR, 'sgra_zoom.png'),
+    'Figure 2: Zoomed view of the central 200x200 arcsec (Sgr A* region) at three '
+    'frequencies within one subband. The dominant compact source is clearly detected '
+    'in each 26 kHz channel.'
+)
 
-    def para(self, s, size=9.5, width=95, dy=0.022):
-        """Write wrapped paragraph text."""
-        lines = textwrap.wrap(s, width)
-        for line in lines:
-            self.ax.text(0.0, self.y, line, fontsize=size,
-                         transform=self.ax.transAxes, verticalalignment='top',
-                         fontfamily='serif')
-            self.y -= dy
+# === 4. Computational Resources ===
+pdf.section('4. Computational Resources')
+pdf.body_text(
+    'All processing was performed on the Lawrencium HPC cluster at '
+    'UC Berkeley, managed by SLURM. Subband splitting was submitted as '
+    'a serial array job (max 8 concurrent tasks to match the 8 Lustre '
+    'OSTs over which the MS is striped). Imaging was fully parallelized '
+    'as a SLURM array job with one subband per compute node (56 cores, '
+    '240 GB RAM per node, lr7 partition). Dirty imaging required ~50 '
+    'minutes per subband wall-clock time.'
+)
 
-    def gap(self, dy=0.015):
-        self.y -= dy
+# === 5. Data Products ===
+pdf.section('5. Data Products')
+pdf.body_text(
+    'The primary data products are individual FITS images for each of '
+    'the 32,768 spectral channels. '
+    'Each FITS file contains a single Stokes I image of 512x512 pixels '
+    'at 2 arcsec resolution, in units of Jy/beam. Channel frequencies '
+    'are encoded in the FITS filename (chan_NNNN_FFFF.FFFMHz.fits) '
+    'using the exact channel frequency from the MS metadata.'
+)
 
+# Figure: cross-subband comparison
+pdf.figure(
+    os.path.join(PLOTS_DIR, 'cross_subband.png'),
+    'Figure 3: Mid-channel dirty images from six subbands spanning the L-band. '
+    'The source morphology evolves with frequency as expected from the '
+    'frequency-dependent synthesized beam and sky brightness distribution.',
+    width=170
+)
 
-def make_page():
-    fig = plt.figure(figsize=(8.5, 11))
-    ax = fig.add_axes([0.08, 0.08, 0.84, 0.86])
-    ax.axis('off')
-    return fig, PageWriter(ax)
+# === 6. Frequency Coverage and RFI ===
+pdf.section('6. Frequency Coverage and RFI')
+pdf.body_text(
+    'The MeerKAT L-band receiver covers 856-1712 MHz. Several known '
+    'radio frequency interference (RFI) sources affect portions of the '
+    'band, including GSM-900 downlink (925-960 MHz), aircraft DME/SSR '
+    '(1030-1090 MHz), GPS L5/Galileo E5 (1164-1214 MHz), GPS L2 '
+    '(1217-1237 MHz), GPS L1/Galileo E1 (1559-1591 MHz), Glonass L1 '
+    '(1598-1610 MHz), and Iridium (1610-1618 MHz). No RFI flagging '
+    'has been applied to the current images; the data were delivered '
+    'with the MeerKAT SDP calibration but without post-delivery RFI '
+    'excision. The relatively RFI-quiet region around 1.3 GHz is of '
+    'primary interest for the axion search.'
+)
 
+# Figure: RMS and peak vs frequency
+pdf.figure(
+    os.path.join(PLOTS_DIR, 'rms_peak_vs_freq.png'),
+    'Figure 4: Peak flux density (top) and RMS noise (bottom) of the mid-channel '
+    'dirty image for each completed subband across the L-band. Shaded regions indicate '
+    'known MeerKAT RFI bands. Elevated noise is visible near the GSM-900 and '
+    'aircraft DME bands.'
+)
 
-with PdfPages(pdf_path) as pdf:
-    # === Page 1 ===
-    fig, pw = make_page()
+# Figure: waterfall
+pdf.figure(
+    os.path.join(PLOTS_DIR, 'waterfall.png'),
+    'Figure 5: Waterfall plot showing flux density along a horizontal slice through '
+    'the image center as a function of frequency for one subband. Left: full dynamic range. '
+    'Right: stretched scale (5th-95th percentile). Horizontal stripes would indicate '
+    'RFI-affected channels; the smooth vertical structure traces the central source.'
+)
 
-    pw.title('MeerKAT Galactic Center Data Reduction', size=15, dy=0.05)
-    pw.para('J. Benabou, UC Berkeley / Safdi Group', size=10)
-    pw.gap(dy=0.03)
+# === 7. Systematics ===
+pdf.section('7. Known Systematics')
+pdf.body_text(
+    'The first channel of each subband exhibits elevated peak flux '
+    '(approximately 3x the median), consistent with a bandpass edge '
+    'effect introduced by the channel splitting. These edge channels '
+    'are excluded from the science analysis. The FITS WCS frequency '
+    'axis (CRVAL3) records the tclean cube reference frequency rather '
+    'than the per-channel frequency; the true channel frequency is '
+    'obtained from the filename or computed via '
+    'CRVAL3 + (1 - CRPIX3) * CDELT3.'
+)
 
-    pw.heading('1. Observation')
-    pw.para(
-        'We use data from the MeerKAT Galactic Centre Legacy Survey '
-        '(proposal SCI-20210212-SS-01). The observation targets Sgr A* in '
-        'L-band (856\u20131712 MHz) with 32,768 spectral channels at a native '
-        'channel width of 26.123 kHz. The total measurement set (MS) is '
-        '~17 TB. The data were pre-calibrated by the MeerKAT Science Data '
-        'Processor (SDP) pipeline prior to archive delivery.'
-    )
-    pw.gap()
+# === 8. Validation ===
+pdf.section('8. Image Validation')
+pdf.body_text(
+    'Several diagnostic checks were performed on the dirty images to '
+    'verify data quality and pipeline correctness.'
+)
 
-    pw.heading('2. Subband Splitting')
-    pw.para(
-        'The monolithic MS was split into 86 independent subbands of 383 '
-        'channels each (~10 MHz per subband) using the CASA split task '
-        '(casatasks.split, CASA 6.x). Splitting was performed serially to '
-        'avoid file-locking contention on the Lustre parallel filesystem. '
-        'Each split operation selected a contiguous range of channels via '
-        'the spw parameter (spw="0:start~end") and wrote the DATA column '
-        'to a new MS. The typical split time was ~90 minutes per subband. '
-        'No frequency regridding was applied; the TOPO-to-LSRK Doppler '
-        'correction is <0.1 channel widths for a single observation and is '
-        'applied as a metadata correction in post-processing.'
-    )
-    pw.gap()
+# Figure: noise histogram
+pdf.figure(
+    os.path.join(PLOTS_DIR, 'noise_histogram.png'),
+    'Figure 6: Pixel value distribution for a representative mid-band channel '
+    'compared to a Gaussian fit. Left: linear scale showing the noise core is '
+    'well-described by thermal noise. Right: log scale revealing the positive '
+    'tail from real astronomical emission. The Gaussian noise core confirms '
+    'proper calibration.'
+)
 
-    pw.heading('3. Imaging')
-    pw.para(
-        'Channel images were produced using the CASA tclean task in cube '
-        'mode (specmode="cube"), generating a 383-channel image cube per '
-        'subband in a single tclean call. Each cube was then decomposed '
-        'into individual single-channel FITS files using imsubimage and '
-        'exportfits, yielding one 512x512 pixel image per spectral channel '
-        'at 2 arcsec pixel scale (between 1/3 and 1/5 of the synthesized '
-        'beam across the band). Briggs weighting with robust=0.5 was used. '
-        'The full dataset produces 32,768 channel images spanning '
-        '856\u20131712 MHz at the native 26.123 kHz resolution.'
-    )
-    pw.gap()
-    pw.para(
-        'Two sets of images are produced:'
-    )
-    pw.gap(dy=0.005)
-    pw.para(
-        '(a) Dirty images (niter=0): These are the direct Fourier inversion '
-        'of the calibrated visibilities with no deconvolution, providing an '
-        'unbiased representation of the sky convolved with the synthesized '
-        'beam (PSF). The dirty image noise is ~0.09 Jy/beam per 26 kHz '
-        'channel in the mid-band (~1.1 GHz).'
-    )
-    pw.gap(dy=0.005)
-    pw.para(
-        '(b) Cleaned images (niter=10,000): Deconvolved images using the '
-        'Hogbom CLEAN algorithm with auto-multithresh masking '
-        '(sidelobethreshold=2.0, noisethreshold=5.0, lownoisethreshold=1.5, '
-        'minbeamfrac=0.3). The auto-masking identifies emission regions '
-        'without manual intervention, appropriate for the complex Galactic '
-        'Center field.'
-    )
-    pw.gap()
+# Figure: beam vs frequency
+pdf.figure(
+    os.path.join(PLOTS_DIR, 'beam_vs_freq.png'),
+    'Figure 7: Synthesized beam major and minor axis as a function of frequency. '
+    'The beam size decreases at higher frequencies as expected (beam ~ wavelength/baseline). '
+    'Shaded bands indicate known RFI regions.',
+    width=170
+)
 
-    pw.heading('4. Computational Resources')
-    pw.para(
-        'All processing was performed on the Lawrencium HPC cluster at '
-        'UC Berkeley, managed by SLURM. Subband splitting was submitted as '
-        'a serial array job (max 8 concurrent tasks to match the 8 Lustre '
-        'OSTs over which the MS is striped). Imaging was fully parallelized '
-        'as a SLURM array job with one subband per compute node (56 cores, '
-        '240 GB RAM per node, lr7 partition). Dirty imaging required ~50 '
-        'minutes per subband; cleaned imaging requires approximately 2\u20134 '
-        'hours per subband.'
-    )
-    pw.gap()
+# === 9. Science Application ===
+pdf.section('9. Science Application')
+pdf.body_text(
+    'The native 26.123 kHz channel resolution is preserved throughout '
+    'the imaging pipeline, as required for the axion-photon conversion '
+    'search. The expected axion signal line width may be comparable to '
+    'the channel width, making frequency downbinning unacceptable. '
+    'Each channel image will be analyzed independently for narrow '
+    'spectral features consistent with axion dark matter conversion in '
+    'neutron star magnetospheres across the 856-1712 MHz band '
+    '(corresponding to axion masses of ~3.5-7.1 ueV).'
+)
 
-    pw.heading('5. Data Products')
-    pw.para(
-        'The primary data products are individual FITS images for each of '
-        'the 32,768 spectral channels, in both dirty and cleaned versions. '
-        'Each FITS file contains a single Stokes I image of 512x512 pixels '
-        'at 2 arcsec resolution, in units of Jy/beam. Channel frequencies '
-        'are encoded in the FITS filename (chan_NNNN_FFFF.FFFMHz.fits) '
-        'using the exact channel frequency from the MS metadata. Dirty '
-        'images are stored in images/subband_XXX/ and cleaned images in '
-        'images/subband_XXX/cleaned/.'
-    )
+# === Summary Table ===
+pdf.section('Summary Table')
+pdf.ln(2)
+rows = [
+    ('Telescope',           'MeerKAT (64 dishes)'),
+    ('Band',                'L-band, 856-1712 MHz'),
+    ('Channels',            '32,768 @ 26.123 kHz'),
+    ('Target',              'Sgr A* / Galactic Center'),
+    ('Calibration',         'MeerKAT SDP pipeline (pre-calibrated)'),
+    ('Image size',          '512 x 512 pixels, 2 arcsec/pixel'),
+    ('Weighting',           'Briggs, robust = 0.5'),
+    ('Dirty image noise',   '~0.09 Jy/beam per channel (mid-band)'),
+    ('Data products',       '32,768 FITS channel images'),
+    ('Total MS size',       '~17 TB'),
+    ('Processing cluster',  'Lawrencium (UC Berkeley HPC)'),
+    ('Time per subband',    '~50 min (dirty imaging)'),
+]
+for label, value in rows:
+    pdf.table_row(label, value)
 
-    pdf.savefig(fig)
-    plt.close(fig)
+pdf.ln(5)
 
-    # === Page 2 ===
-    fig, pw = make_page()
+# === Software ===
+pdf.section('10. Software')
+pdf.body_text(
+    'CASA 6.x (modular installation via pip: casatools, casatasks). '
+    'Image analysis and visualization: astropy, matplotlib, numpy. '
+    'Cluster job management: SLURM. All scripts are available in the '
+    'project repository under scripts/.'
+)
 
-    pw.heading('6. Frequency Coverage and RFI')
-    pw.para(
-        'The MeerKAT L-band receiver covers 856\u20131712 MHz. Several known '
-        'radio frequency interference (RFI) sources affect portions of the '
-        'band, including GSM-900 downlink (925\u2013960 MHz), aircraft DME/SSR '
-        '(1030\u20131090 MHz), GPS L5/Galileo E5 (1164\u20131214 MHz), GPS L2 '
-        '(1217\u20131237 MHz), GPS L1/Galileo E1 (1559\u20131591 MHz), Glonass L1 '
-        '(1598\u20131610 MHz), and Iridium (1610\u20131618 MHz). No RFI flagging '
-        'has been applied to the current images; the data were delivered '
-        'with the MeerKAT SDP calibration but without post-delivery RFI '
-        'excision. The relatively RFI-quiet region around 1.3 GHz is of '
-        'primary interest for the axion search.'
-    )
-    pw.gap()
-
-    pw.heading('7. Known Systematics')
-    pw.para(
-        'The first channel of each subband exhibits elevated peak flux '
-        '(approximately 3x the median), consistent with a bandpass edge '
-        'effect introduced by the channel splitting. These edge channels '
-        'are excluded from the science analysis. The FITS WCS frequency '
-        'axis (CRVAL3) records the tclean cube reference frequency rather '
-        'than the per-channel frequency; the true channel frequency is '
-        'obtained from the filename or computed via '
-        'CRVAL3 + (1 - CRPIX3) * CDELT3.'
-    )
-    pw.gap()
-
-    pw.heading('8. Science Application')
-    pw.para(
-        'The native 26.123 kHz channel resolution is preserved throughout '
-        'the imaging pipeline, as required for the axion-photon conversion '
-        'search. The expected axion signal line width may be comparable to '
-        'the channel width, making frequency downbinning unacceptable. '
-        'Each channel image will be analyzed independently for narrow '
-        'spectral features consistent with axion dark matter conversion in '
-        'neutron star magnetospheres across the 856\u20131712 MHz band '
-        '(corresponding to axion masses of ~3.5\u20137.1 \u03bceV).'
-    )
-    pw.gap()
-
-    pw.heading('9. Software')
-    pw.para(
-        'CASA 6.x (modular installation via pip: casatools, casatasks). '
-        'Image analysis and visualization: astropy, matplotlib, numpy. '
-        'Cluster job management: SLURM. All scripts are available in the '
-        'project repository under scripts/.'
-    )
-    pw.gap()
-
-    pw.heading('Summary Table')
-    pw.gap(dy=0.005)
-    rows = [
-        ('Telescope',           'MeerKAT (64 dishes)'),
-        ('Band',                'L-band, 856\u20131712 MHz'),
-        ('Channels',            '32,768 @ 26.123 kHz'),
-        ('Target',              'Sgr A* / Galactic Center'),
-        ('Calibration',         'MeerKAT SDP pipeline (pre-calibrated)'),
-        ('Image size',          '512 x 512 pixels, 2 arcsec/pixel'),
-        ('Weighting',           'Briggs, robust = 0.5'),
-        ('Dirty image noise',   '~0.09 Jy/beam per channel (mid-band)'),
-        ('Clean niter',         '10,000 (auto-multithresh mask)'),
-        ('Data products',       '32,768 FITS per image type (dirty + cleaned)'),
-        ('Total MS size',       '~17 TB'),
-        ('Processing cluster',  'Lawrencium (UC Berkeley HPC)'),
-    ]
-    for label, value in rows:
-        pw.ax.text(0.02, pw.y, label, fontsize=9, fontweight='bold',
-                   transform=pw.ax.transAxes, verticalalignment='top',
-                   fontfamily='serif')
-        pw.ax.text(0.30, pw.y, value, fontsize=9,
-                   transform=pw.ax.transAxes, verticalalignment='top',
-                   fontfamily='serif')
-        pw.y -= 0.024
-
-    pdf.savefig(fig)
-    plt.close(fig)
-
-print(f'PDF written to: {pdf_path}')
+pdf.output(PDF_PATH)
+print(f'PDF written to: {PDF_PATH}')
+print(f'Pages: {pdf.page_no()}')
