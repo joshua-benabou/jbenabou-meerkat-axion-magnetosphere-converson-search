@@ -11,11 +11,15 @@
 #SBATCH --output=/global/scratch/projects/pc_heptheory/jbenabou/NS_megaproject/MeerKAT_data/meerkat_reduction_project/scripts/logs/phase3_clean_%a.out
 #SBATCH --error=/global/scratch/projects/pc_heptheory/jbenabou/NS_megaproject/MeerKAT_data/meerkat_reduction_project/scripts/logs/phase3_clean_%a.err
 #
-# Phase 3b: Cleaned imaging (niter=10000, auto-multithresh).
+# Phase 3b: Cleaned imaging with 10% peak threshold (no mask).
+# Measures peak from existing dirty images, sets threshold = 10% of peak.
 # One tclean call per subband, all 86 subbands in parallel.
 # Output: images/subband_XXX/cleaned/chan_NNNN_FFFF.FFFMHz.fits
 #
-# Submit AFTER dirty imaging is complete:
+# Test single subband first:
+#   sbatch --array=30 phase3_clean_submit.sh
+#
+# Then full run:
 #   sbatch phase3_clean_submit.sh
 #
 

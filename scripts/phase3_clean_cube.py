@@ -2,13 +2,15 @@
 """
 Phase 3b: Cleaned channel imaging using tclean cube mode.
 
-Produces cleaned (niter=10000) image cubes per subband, then exports each
-channel to individual FITS files. Uses auto-multithresh masking.
+Strategy: measure peak flux from existing dirty images, then clean with
+threshold = 10% of peak. No mask (the GC fills much of the field).
 
-niter=10000 is sufficient for 512x512 at L-band with Briggs r=0.5:
-- MeerKAT's PSF is well-behaved, so the deconvolver converges quickly
-- auto-multithresh handles masking without manual intervention
-- threshold='0.0mJy' lets the automask control stopping (via sidelobethreshold)
+This replaces the broken auto-multithresh approach, which set thresholds
+based on full-image RMS (dominated by sidelobes) and produced zero clean
+components. The 10% peak threshold was validated in debug_cleaning.py:
+- Reduces corner RMS from 40 -> 26 mJy (34% improvement)
+- 10,781 model pixels, 14,987 mJy model flux
+- 1%, 5%, and 10% peak all converge to the same solution
 
 Usage:
     Called by phase3_clean_submit.sh via SLURM array job.
@@ -19,8 +21,10 @@ import os
 import sys
 import time
 import shutil
+import glob
+import numpy as np
 import casatools
-from casatasks import tclean, exportfits, imsubimage
+from casatasks import tclean, exportfits, imsubimage, imstat
 
 # === Configuration ===
 SUBBANDS_DIR = (
@@ -34,10 +38,43 @@ IMAGES_DIR = (
 
 IMSIZE = [512, 512]
 CELL = '2arcsec'
-NITER = 10000
+NITER = 100000
 WEIGHTING = 'briggs'
 ROBUST = 0.5
 SAVEMODEL = 'none'
+THRESHOLD_FRAC = 0.10  # 10% of peak flux
+
+
+def measure_peak_from_dirty(subband_idx):
+    """Measure peak flux from existing dirty FITS files for this subband.
+
+    Samples ~10 channels spread across the subband (avoiding channel 0
+    which has a known edge artifact) and returns the median peak.
+    """
+    dirty_dir = os.path.join(IMAGES_DIR, f'subband_{subband_idx:03d}')
+    fits_files = sorted(glob.glob(os.path.join(dirty_dir, 'chan_*.fits')))
+
+    if not fits_files:
+        return None
+
+    # Sample channels spread across the subband
+    n = len(fits_files)
+    # Skip channel 0 (edge artifact), sample ~10 evenly spaced
+    indices = np.linspace(max(1, n // 20), n - 1, min(10, n)).astype(int)
+
+    from astropy.io import fits as pyfits
+    peaks = []
+    for idx in indices:
+        with pyfits.open(fits_files[idx]) as hdul:
+            data = hdul[0].data
+            while data.ndim > 2:
+                data = data[0]
+            peaks.append(np.nanmax(data))
+
+    median_peak = np.median(peaks)
+    print(f"  Peak from dirty images: median={median_peak*1e3:.3f} mJy "
+          f"(sampled {len(peaks)} channels)", flush=True)
+    return median_peak
 
 
 def main():
@@ -51,8 +88,6 @@ def main():
         print(f"Subband {subband_idx}: {input_ms} does not exist, skipping.", flush=True)
         return
 
-    os.makedirs(output_dir, exist_ok=True)
-
     # Get channel info
     msmd = casatools.msmetadata()
     msmd.open(input_ms)
@@ -60,19 +95,35 @@ def main():
     freqs = msmd.chanfreqs(0)
     msmd.close()
 
-    # Check if already complete
-    existing_fits = [f for f in os.listdir(output_dir) if f.endswith('.fits')]
-    if len(existing_fits) >= nchan:
-        print(f"Subband {subband_idx}: already has {len(existing_fits)} cleaned FITS files "
-              f"(expected {nchan}). Skipping.", flush=True)
+    # Measure peak from existing dirty images to set threshold
+    peak_jy = measure_peak_from_dirty(subband_idx)
+    if peak_jy is None or peak_jy <= 0:
+        print(f"Subband {subband_idx}: could not measure peak from dirty images. "
+              f"Run dirty imaging first.", flush=True)
         return
+
+    threshold_jy = THRESHOLD_FRAC * peak_jy
+    threshold_mjy = threshold_jy * 1e3
+    print(f"  Cleaning threshold: {THRESHOLD_FRAC*100:.0f}% of peak = "
+          f"{threshold_mjy:.3f} mJy", flush=True)
+
+    # Remove old broken cleaned FITS if they exist
+    if os.path.isdir(output_dir):
+        old_fits = glob.glob(os.path.join(output_dir, '*.fits'))
+        if old_fits:
+            print(f"  Removing {len(old_fits)} old cleaned FITS from broken run...",
+                  flush=True)
+            for f in old_fits:
+                os.remove(f)
+
+    os.makedirs(output_dir, exist_ok=True)
 
     print(f"=== Phase 3b: Cleaned imaging subband {subband_idx} ===", flush=True)
     print(f"  Input: {input_ms}", flush=True)
     print(f"  Channels: {nchan}", flush=True)
     print(f"  Freq range: {freqs[0]/1e6:.3f}-{freqs[-1]/1e6:.3f} MHz", flush=True)
     print(f"  niter: {NITER}", flush=True)
-    print(f"  Existing cleaned FITS: {len(existing_fits)}", flush=True)
+    print(f"  threshold: {threshold_mjy:.3f} mJy ({THRESHOLD_FRAC*100:.0f}% of peak)", flush=True)
     print(f"  Start time: {time.strftime('%Y-%m-%d %H:%M:%S')}", flush=True)
 
     # Step 1: tclean cube mode with cleaning
@@ -99,14 +150,17 @@ def main():
         robust=ROBUST,
         savemodel=SAVEMODEL,
         pbcor=False,
-        usemask='auto-multithresh',
-        sidelobethreshold=2.0,
-        noisethreshold=5.0,
-        lownoisethreshold=1.5,
-        minbeamfrac=0.3,
+        threshold=f'{threshold_mjy}mJy',
     )
     t_tclean = time.time() - t0
     print(f"  tclean clean cube done: {t_tclean:.1f}s ({t_tclean/60:.1f} min)", flush=True)
+
+    # Quick sanity check: model flux from the cube
+    model_image = imagename + '.model'
+    if os.path.isdir(model_image):
+        model_stats = imstat(model_image)
+        print(f"  Model flux (total): {model_stats['sum'][0]*1e3:.3f} mJy", flush=True)
+        print(f"  Model max:          {model_stats['max'][0]*1e3:.3f} mJy/beam", flush=True)
 
     # Step 2: Export each channel to individual FITS
     cube_image = imagename + '.image'

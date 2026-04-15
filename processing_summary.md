@@ -1,6 +1,6 @@
 # MeerKAT Galactic Center Data Reduction: Processing Summary
 
-**Date**: 2026-04-12 (updated 2026-04-12 evening)
+**Date**: 2026-04-15
 **PI**: Josh Benabou (UC Berkeley, Safdi group)
 **Dataset**: MeerKAT L-band, 800-1400 MHz, ~32,768 channels at 26.123 kHz native resolution
 **Target**: Sgr A* / Galactic Center
@@ -10,16 +10,17 @@
 
 ## Pipeline Overview
 
-The 17 TB monolithic measurement set (MS) is being processed through a multi-phase pipeline on the Lawrencium HPC cluster (UC Berkeley). The core challenge — CASA's file-locking preventing parallel access to the monolithic MS — was solved by serial subband splitting followed by parallel imaging.
+The 17 TB monolithic measurement set (MS) is being processed through a multi-phase pipeline on the Lawrencium HPC cluster (UC Berkeley). The core challenge -- CASA's file-locking preventing parallel access to the monolithic MS -- was solved by serial subband splitting followed by parallel imaging.
 
 ```
 Phase 0: Reconnaissance & Setup .................. COMPLETE
-Phase 1: Subband Splitting (serial) .............. 86/86 COMPLETE (re-splits running for 5 corrupted)
-Phase 2: Continuum Subtraction ................... SKIPPED (for now)
-Phase 3a: Dirty Channel Imaging (parallel) ....... 73/86 COMPLETE, 13 RUNNING
-Phase 3a: FITS Export ............................ 45/86 COMPLETE, 24 recovery jobs submitted
-Phase 3b: Cleaned Channel Imaging ................ READY (script written, submit after 3a)
-Phase 4: FITS Assembly & Catalog ................. NOT STARTED
+Phase 1: Subband Splitting (serial) .............. 86/86 COMPLETE
+Phase 2: Continuum Subtraction ................... DROPPED (sideband analysis replaces it)
+Phase 3a: Dirty Channel Imaging (parallel) ....... 86/86 COMPLETE (32,768 FITS)
+Phase 3b: Cleaned Channel Imaging ................ TEST RUNNING (fix validated, production ready)
+Phase 5: RFI Flagging ............................ COMPLETE (5.1% channels flagged)
+Phase 6: Sanity Checks ........................... NOT STARTED
+Phase 7: Axion Search (sideband analysis) ........ SKELETON WRITTEN
 ```
 
 ---
@@ -42,9 +43,7 @@ Phase 4: FITS Assembly & Catalog ................. NOT STARTED
 |--------|-------|
 | Total subbands | 86 (indices 0-85) |
 | Channels per subband | 383 |
-| Completed | 86 |
-| Corrupted (re-splitting) | 44, 52, 56, 62, 70 (FilebufIO read errors) |
-| Re-split running | 44, 52, 56, 61, 62, 70, 72 |
+| Completed | 86/86 |
 | Time per subband | 80-113 min (median ~88 min) |
 | Total split time | ~125 hours (serial) |
 | Subband disk usage | ~12 TB total |
@@ -60,21 +59,38 @@ Phase 4: FITS Assembly & Catalog ................. NOT STARTED
 - Cell size: 2 arcsec
 - Weighting: Briggs, robust=0.5
 - niter: 0 (dirty images)
-- savemodel: 'none' (critical — avoids write locks)
+- savemodel: 'none' (critical -- avoids write locks)
 - SLURM: 1 node per subband, 56 cores, 240 GB RAM, lr7 partition
 
-### Imaging Progress
+**Status**: COMPLETE -- 32,768 FITS files across 86 subbands.
 
-| Status | Count | Subbands |
-|--------|-------|----------|
-| FITS exported (383/383) | 45 | 002-006, 008, 014-017, 021-025, 032, 035, 041-043, 045-051, 053-055, 057-060, 063-069, 071 |
-| Cube exists, no FITS (recovery submitted) | 24 | 000, 001, 007, 009-013, 018-020, 026-031, 033, 034, 036-040 |
-| Partial FITS (still imaging) | 3 | 073 (302), 074 (274), 085 (17) |
-| Corrupted MS (re-splitting) | 5 | 044, 052, 056, 062, 070 |
-| Currently imaging (SLURM) | 13 | 073-085 on lr7 |
-| Re-splitting on lr6 | 7 | 44, 52, 56, 61, 62, 70, 72 |
+### Example Dirty Image
 
-**Total FITS exported**: ~16,567 / 32,768 channels (51%)
+![Example dirty image of the Galactic Center at 1158.8 MHz (single 26 kHz channel)](plots/dirty_image_example.png)
+
+### Noise and Peak Flux vs Frequency
+
+![RMS noise and peak flux as a function of frequency across all subbands](plots/rms_peak_vs_freq.png)
+
+### Beam Size vs Frequency
+
+![Synthesized beam FWHM as a function of frequency](plots/beam_vs_freq.png)
+
+### Cross-Subband Continuity
+
+![Cross-subband boundary check showing continuity across subband edges](plots/cross_subband.png)
+
+### Frequency-Pixel Waterfall
+
+![Waterfall plot showing central pixel intensity vs frequency](plots/waterfall.png)
+
+### Noise Histogram
+
+![Histogram of per-channel RMS noise values](plots/noise_histogram.png)
+
+### Sgr A* Zoom
+
+![Zoomed view of the Sgr A* region](plots/sgra_zoom.png)
 
 ### Timing
 
@@ -86,25 +102,134 @@ Phase 4: FITS Assembly & Catalog ................. NOT STARTED
 
 ### Known Issue: exportfits 'channel' Keyword Bug
 
-The initial implementation attempted to use `exportfits(channel=N)` to extract individual channels from the cube. This parameter does not exist in the installed CASA version, causing silent export failure — tclean succeeded but no FITS were produced.
+The initial implementation attempted to use `exportfits(channel=N)` to extract individual channels from the cube. This parameter does not exist in the installed CASA version, causing silent export failure -- tclean succeeded but no FITS were produced.
 
 **Fix**: Two-step export using `imsubimage(chans=str(N))` to extract a single-channel image, then `exportfits()` on that. A recovery script (`phase3_export_recovery.py`) was created to re-export FITS from cubes that had already been produced.
 
 ### FITS Validation
 
-Spot-checked subbands 023 and 050:
+Spot-checked multiple subbands:
 
 | Check | Result |
 |-------|--------|
 | Pixel data distinct across channels | PASS |
 | No NaN values | PASS |
 | No all-zero images | PASS |
-| Shape | (1, 1, 512, 512) — correct |
-| Units | Jy/beam — correct |
+| Shape | (1, 1, 512, 512) -- correct |
+| Units | Jy/beam -- correct |
 | Noise level (mid-channel) | ~0.09 Jy/beam |
 | Channel 0 anomaly | Peak 3x higher than other channels (edge effect) |
 
-**Frequency header note**: FITS `CRVAL3` is set to the tclean cube reference frequency (first channel), not the per-channel frequency. The actual channel frequency is encoded in the filename (`chan_NNNN_FFFF.FFFMHz.fits`) which is taken directly from the MS metadata. The WCS can recover frequency via `CRVAL3 + (1 - CRPIX3) * CDELT3`, but this gives the tclean grid frequency which is offset by ~88 kHz from the true MS channel frequency. For science use, **read frequency from the filename**.
+**Frequency header note**: FITS `CRVAL3` is set to the tclean cube reference frequency (first channel), not the per-channel frequency. The actual channel frequency is encoded in the filename (`chan_NNNN_FFFF.FFFMHz.fits`) which is taken directly from the MS metadata. For science use, **read frequency from the filename**.
+
+---
+
+## Phase 3b: Cleaned Imaging
+
+### Initial Failure: auto-multithresh
+
+The first cleaning attempt used CASA's `auto-multithresh` mask with `noisethreshold=5.0`. This produced **zero clean components** across all channels and all strategies tested.
+
+**Root cause**: The `imstat` RMS over the full 512x512 image (~95 mJy) is dominated by sidelobes from the bright GC field, not thermal noise. Setting threshold = 3 × 95 = 285 mJy exceeded the peak flux (271 mJy), so nothing was cleaned.
+
+### Fix: Off-Source Noise Measurement + Percentage-of-Peak Threshold
+
+Measuring RMS in the image corners (off-source, 64x64 pixel boxes) gives the true thermal noise: **~40 mJy** (corner) vs ~95 mJy (full image). The correct per-channel SNR is **~6.8**, not 2.9.
+
+A threshold of 10% of peak flux works robustly:
+
+| Strategy | Threshold | Model Flux | Model Pixels | Corner RMS |
+|----------|-----------|------------|--------------|------------|
+| 3-sigma corner | 120 mJy | 10,885 mJy | 1,141 | 37.5 mJy |
+| 5-sigma corner | 200 mJy | 1,850 mJy | 84 | 39.7 mJy |
+| 10% peak | 27 mJy | 14,987 mJy | 10,781 | **26.4 mJy** |
+| 5% peak | 14 mJy | 14,987 mJy | 10,781 | **26.4 mJy** |
+| 1% peak | 2.7 mJy | 14,987 mJy | 10,781 | **26.4 mJy** |
+| auto-multithresh | auto | 1,925 mJy | 230 | 39.7 mJy |
+
+The 1%, 5%, and 10% peak strategies all converge to the same solution -- **RMS reduced by 34%** (40 to 26 mJy).
+
+### Dirty vs Cleaned Comparison
+
+![Side-by-side comparison of dirty and cleaned images for a single 26 kHz channel](plots/cleaning_comparison_sb030_ch100.png)
+
+### All Cleaning Strategies Compared
+
+![Comparison of 6 cleaning strategies on the same channel](plots/cleaning_strategies_comparison.png)
+
+### Production Cleaning Strategy
+
+The production script (`phase3_clean_cube.py`) now:
+
+1. Reads existing dirty FITS to measure peak flux per subband (adaptive threshold)
+2. Sets threshold = 10% of median peak
+3. Runs tclean cube mode with that threshold, no mask
+4. Exports each channel to individual FITS in `images/subband_XXX/cleaned/`
+
+Peak flux varies across subbands (6-287 mJy), so adaptive thresholding is essential.
+
+### Production Cleaning Validation
+
+84/86 subbands cleaned (subbands 0 and 8 still running -- band-edge, slower). Median corner RMS improvement: 6.1%. Model flux 2--9 kJy per subband, confirming real deconvolution.
+
+![Dirty vs Cleaned side-by-side across 6 subbands with difference images](plots/cleaning_validation_grid.png)
+
+![Cleaning summary: model flux, peak flux, corner RMS, and improvement vs frequency](plots/cleaning_validation_summary.png)
+
+---
+
+## Phase 5: RFI Flagging
+
+**Status**: COMPLETE -- 1,656 / 32,768 channels flagged (5.1%)
+
+Flagging is boolean-only (channels marked as good/bad, images not modified). Criteria:
+- RMS outliers: > 3x local median RMS (sliding window of 50 channels)
+- Known RFI bands: GSM-900, GPS L1
+- Band edges: first/last 5 channels of each subband
+
+![RFI flagging overview showing flagged channels across the band](plots/rfi_overview.png)
+
+Output: `rfi_channel_flags.csv` with per-channel flag status and reason.
+
+---
+
+## Sam Witte's NS Population Modeling
+
+Sam Witte provided pre-computed neutron star populations and axion-photon conversion signals (`Real_Analysis.zip`, 2 GB). The code generates populations of NSs, ray-traces axion conversion for each, and outputs flux weights that can be histogrammed into spectra.
+
+### Data Structure
+
+- **Two population models**: Young ($\tau_{\rm ohm} = 10$ Myr, 10 realizations) and Old ($\tau_{\rm ohm} = 1$ Tyr, 4 realizations)
+- **Three axion masses computed**: 3.54, 4.13, 7.08 $\mu$eV (matching our band edges + midpoint: 856--1712 MHz)
+- **Per-NS output**: ray-traced photon weights, energies, and conversion probabilities
+- **Combined flux**: `Combined_Flux.dat` with columns [NS index, flux weight (Jy-Hz), photon energy (eV), conversion probability at $g = 10^{-12}$ GeV$^{-1}$, x, y, z (kpc)]
+
+### Key Findings
+
+- Young Pop 0: 3,998 NSs total, 756 with axion conversion at $m_a = 4.13\;\mu$eV
+- Old population: 346,843 NSs total, 22,587 converting -- dominates total flux (0.77 Jy vs 0.044 Jy at $g = 10^{-12}$)
+- 45 NSs contribute 50% of total flux; 264 contribute 90%
+- Signal spectrum shows sharp lines near $\nu = m_a c^2 / h$ with Doppler broadening
+
+### Population Properties
+
+![Young NS population properties: B-field, period, age, spatial distribution](plots/sam_young_pop_properties.png)
+
+### Axion Signal Spectrum
+
+![Predicted axion flux spectrum at $m_a = 4.13\;\mu$eV](plots/sam_flux_spectrum_ma4p13.png)
+
+### Per-NS Flux Contributions
+
+![Per-NS flux distribution and cumulative flux](plots/sam_per_ns_flux.png)
+
+### Young vs Old Populations
+
+![Young vs old NS population comparison](plots/sam_young_vs_old.png)
+
+### Three Masses Comparison
+
+![Comparison of predicted spectra at three axion masses](plots/sam_three_masses_comparison.png)
 
 ---
 
@@ -115,18 +240,9 @@ Spot-checked subbands 023 and 050:
 | Original MS | ~17 TB |
 | Compressed archive | ~12 TB |
 | Split subbands | ~12 TB |
-| Images (FITS + CASA products) | ~73 GB |
+| Dirty images (FITS) | ~73 GB |
+| Cleaned images (FITS) | TBD (~73 GB expected) |
 | **Total** | **~41 TB** |
-
-## Outstanding Work
-
-1. **Finish dirty imaging**: 13 jobs running (subbands 73-85), ~30 min remaining
-2. **Export recovery**: Submitted (job 21918030) for 24 subbands with cubes but no FITS
-3. **Re-split corrupted subbands**: Jobs running/submitted for 44, 52, 56, 61, 62, 70, 72 — then need re-imaging
-4. **Cleaned imaging (Phase 3b)**: Script ready (`phase3_clean_cube.py`, niter=10000, auto-multithresh). Submit after all dirty imaging + export is done: `sbatch scripts/phase3_clean_submit.sh`
-5. **Continuum subtraction (Phase 2)**: Skipped for dirty images; may be needed before cleaned imaging
-6. **FITS assembly & frequency catalog (Phase 4)**: Create master mapping of filename to frequency
-7. **Investigate channel 0 anomaly**: First channel of each subband has elevated flux — may need flagging
 
 ## Cluster Resources Used
 
@@ -144,10 +260,12 @@ All in `scripts/`:
 | `phase1_split_subbands.py` | Serial subband splitting from monolithic MS |
 | `phase1_submit.sh` | SLURM submission for Phase 1 |
 | `phase3_image_cube.py` | Cube-mode tclean + FITS export per subband |
-| `phase3_cube_submit.sh` | SLURM array submission for Phase 3 |
+| `phase3_cube_submit.sh` | SLURM array submission for Phase 3a |
 | `phase3_export_recovery.py` | Re-export FITS from existing cubes (bug fix) |
-| `phase3_export_recovery_submit.sh` | SLURM submission for export recovery |
-| `phase3_image_channels.py` | Per-channel tclean with multiprocessing (alternative approach) |
-| `phase3_clean_cube.py` | Cleaned imaging (niter=10000, auto-multithresh) |
+| `phase3_clean_cube.py` | Cleaned imaging (10% peak threshold) |
 | `phase3_clean_submit.sh` | SLURM submission for cleaned imaging |
+| `phase5_rfi_flagging.py` | RFI channel quality map |
+| `phase7_axion_search.py` | Sideband analysis pipeline skeleton |
 | `validate_fits.py` | FITS validation script |
+| `debug_cleaning.py` | Cleaning threshold debug test |
+| `plot_cleaning_comparison.py` | Dirty vs cleaned comparison plots |
