@@ -176,6 +176,13 @@ Peak flux varies across subbands (6-287 mJy), so adaptive thresholding is essent
 
 ![Cleaning summary: model flux, peak flux, corner RMS, and improvement vs frequency](plots/cleaning_validation_summary.png)
 
+### Validation Results
+
+- 85/86 subbands cleaned (subband 8 pending -- heavy RFI at 936-946 MHz)
+- All 383 cleaned FITS present per subband, no NaN values
+- Cleaned peak < dirty peak in all subbands (confirming sidelobe removal)
+- **Channel 0 all-zero in 9 subbands** (1, 7, 9, 10, 11, 15, 40, 42, 68): this is the edge channel of each subband, where the correlator's polyphase filter rolls off and visibility data is incomplete or absent. tclean produces an all-zero image when there is no valid data to grid. These channels are already flagged for exclusion by the Phase 5 band-edge flagging (first/last 5 channels per subband). At most 9 out of 32,768 channels affected -- negligible.
+
 ---
 
 ## Phase 5: RFI Flagging

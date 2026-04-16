@@ -140,6 +140,19 @@ These scripts document what was tried. They can be adapted for the new pipeline 
 - There are known RFI bands in MeerKAT L-band; channels around 1.3 GHz are relatively RFI-quiet.
 - The 81 previously processed channels start at 1.3 GHz.
 
+## Code & Plot Standards
+
+**AT ALL COSTS, DO NOT PRESENT FAKE PLOTS OR FABRICATED DATA. EVERY NUMBER AND EVERY PLOT MUST COME FROM REAL DATA ON DISK. NEVER INVENT, APPROXIMATE, OR HARDCODE RESULTS TO MAKE THINGS LOOK GOOD.**
+
+All analysis code must follow these rules:
+
+1. **Saved .py script for every plot** (re-runnable, auditable) — no inline/throwaway plotting code
+2. **Real data loading from actual files on disk** — no hardcoded numbers or copy-pasted results
+3. **Diagnostic printout of key numbers** when the script runs — so the output is self-documenting
+4. **No hardcoded results** — everything computed from the data at runtime
+5. **Sanity checks built into the script** (asserts) — catch problems early
+6. **Subagent verification** — check the script output before reporting success to the user
+
 ## Session Handoff
 
 **At the end of every session**, create or update `handoff.md` in the project root with a summary of what happened during the session. This file serves as context for the next session so continuity is not lost. Include:
