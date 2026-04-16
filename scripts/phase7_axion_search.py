@@ -126,6 +126,15 @@ def load_ns_template_bank(filepath: Optional[str] = None) -> List[NSTarget]:
     # TODO: Replace with real implementation -- load Sam Witte's template bank
     # The real template bank will come as a file from Sam with NS positions,
     # predicted axion conversion frequencies, and signal morphology parameters.
+    #
+    # For population-level analysis using Sam's pre-computed ray-tracing data,
+    # use phase7_signal_templates.py (generates per-channel flux templates from
+    # Combined_Flux.dat files) and phase7_sideband_analysis.py (runs sideband
+    # subtraction on FITS images using those templates).
+    #
+    # The NSTarget-based approach here is for targeted searches of individual
+    # known pulsars, while the template-based approach handles the full
+    # population signal.
     print("WARNING: Using dummy NS template bank for testing.", flush=True)
     return [
         NSTarget("PSR_J1745-2900", 266.41684, -29.00781, 920.5, 12.0),

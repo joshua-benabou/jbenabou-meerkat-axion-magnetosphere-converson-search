@@ -121,7 +121,23 @@ def run_test(input_ms, output_dir, chan, label, niter=10000, threshold_mjy=None,
         kwargs['mask'] = mask
 
     t0 = time.time()
-    tclean(**kwargs)
+    try:
+        tclean(**kwargs)
+    except Exception as e:
+        dt = time.time() - t0
+        print(f"\n  *** tclean CRASHED: {e} ***", flush=True)
+        print(f"  Time before crash: {dt:.1f}s", flush=True)
+        # Cleanup
+        for suffix in ['.image', '.model', '.pb', '.psf', '.residual', '.sumwt', '.mask']:
+            p = imagename + suffix
+            if os.path.isdir(p):
+                shutil.rmtree(p)
+        return {
+            'label': label, 'img_peak_mJy': 0, 'img_corner_rms_mJy': 0,
+            'img_full_rms_mJy': 0, 'res_corner_rms_mJy': 0, 'res_full_rms_mJy': 0,
+            'model_flux_mJy': 0, 'n_model_pix': 0, 'DR_image': 0, 'DR_residual': 0,
+            'time_s': dt,
+        }
     dt = time.time() - t0
 
     # Diagnostics

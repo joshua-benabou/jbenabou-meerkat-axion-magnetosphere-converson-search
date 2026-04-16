@@ -240,6 +240,54 @@ Sam Witte provided pre-computed neutron star populations and axion-photon conver
 
 ---
 
+## Phase 6: Sanity Checks
+
+### Noise Assessment
+
+Measured corner RMS is ~163x above theoretical noise (28 mJy vs 0.17 mJy), dominated by sidelobe confusion from the bright GC field. Self-calibration would be needed to approach theoretical sensitivity.
+
+![Noise assessment: measured vs theoretical RMS](plots/sanity_noise_assessment.png)
+
+### Point Source Injection Test
+
+Fake Gaussian point sources injected at various SNR levels into a real dirty image. Recovery rate reaches ~95% only at SNR=20 due to confusion noise.
+
+![Point source injection recovery rate vs SNR](plots/sanity_injection_test.png)
+
+### Cleaning Fidelity
+
+Current cleaning (Hogbom, no mask, cube-mode) reduces RMS by only ~4%. Cleaned/dirty pixel values follow a tight 1:1 relation.
+
+![Cleaning fidelity diagnostics](plots/sanity_cleaning_fidelity.png)
+
+### Detection Threshold
+
+![5-sigma detection threshold vs frequency](plots/sanity_detection_threshold.png)
+
+### Channel-to-Channel Consistency
+
+![Adjacent channel correlation](plots/sanity_channel_consistency.png)
+
+---
+
+## Phase 7: Axion Search Pipeline
+
+### Signal Templates from Sam Witte's Population Code
+
+Sam's pre-computed NS populations have been converted to MeerKAT channel-binned signal templates. For $m_a = 4.13\;\mu$eV, the predicted signal spans ~248 channels around 998.6 MHz.
+
+![Signal template for m_a = 4.13 ueV](plots/phase7_template_ma4.130e-06eV_young_pop0.png)
+
+### Sideband Analysis
+
+Preliminary sideband analysis on the top 5 signal channels shows no detection (max 2.9 sigma), as expected. Estimated 95% CL sensitivity: $g \sim 10^{-12}$ GeV$^{-1}$.
+
+![Sideband analysis diagnostics](plots/phase7_sideband_diagnostics_ma4.130e-06eV_young_pop0.png)
+
+![Sideband sensitivity](plots/phase7_sideband_sensitivity_ma4.130e-06eV_young_pop0.png)
+
+---
+
 ## Disk Usage
 
 | Component | Size |
