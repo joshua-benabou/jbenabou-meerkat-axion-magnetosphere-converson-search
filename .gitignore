@@ -31,3 +31,10 @@ __pycache__/
 
 # OS
 .DS_Store
+
+# Stray notebooks in root (moved to notebooks/)
+inspect_fits.ipynb
+phase6_sanity_checks.ipynb
+
+# Old plot versions
+plots/old_versions/
